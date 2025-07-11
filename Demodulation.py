@@ -4,25 +4,25 @@ import ROOT
 import ctypes
 
 def sin2weight(time):
-    omega = (2 * np.pi) / (3600*23 + 56*60 + 4) #angular frequency of sidereal day
+    omega = (2 * np.pi) / (3600*23 + 56*60 + 4) #angular frequency of sidereal day in Hz
     phase = 0
     return (1 - np.cos(2 * omega * (time- phase))) / 2 #equivalent to sin squared weighting
 
 def cos2weight(time):
-    omega = (2 * np.pi) / (3600*23 + 56*60 + 4) #angular frequency of sidereal day
+    omega = (2 * np.pi) / ((3600*23 + 56*60 + 4)) #angular frequency of sidereal day in Hz
     phase = 0
     return np.cos(2 * omega * (time - phase))**2 #equivalent to cos squared weighting
 
 
 #this function is used for integration to demodulate and extract phase & amplitude
 def cosDemod(time, params): #requires params argument even if unused since integration
-    omega = (2 * np.pi) / (1000*(3600*23 + 56*60 + 4)) #angular frequency of sidereal day
+    omega = (2 * np.pi) / (3600*23 + 56*60 + 4) #angular frequency of sidereal day in Hz
     time1 = time[0]
     phase = 0
     return np.cos(2 * omega * (time1 - phase))
 
 def sinDemod(time, params):
-    omega = (2 * np.pi) / (1000*(3600*23 + 56*60 + 4)) #angular frequency of sidereal day
+    omega = (2 * np.pi) / (3600*23 + 56*60 + 4) #angular frequency of sidereal day in Hz
     time1 = time[0]
     phase = 0
     return np.sin(2 * omega * (time1 - phase))
@@ -45,7 +45,7 @@ if __name__ == "__main__":
     withCos2Weights2 = filtered2.Define("CosWeighting", cos2weight, ["EventTime"])
 
     cols = withSin2Weights2.AsNumpy(["EventTime","Energy", "Sin2Weighting"])  # Extracting the necessary columns
-    timeArr = cols["EventTime"]
+    timeArr = cols["EventTime"]/1000 # Convert time from milliseconds to seconds
     energyArr = cols["Energy"]
     weightArr = cols["Sin2Weighting"]
 
@@ -53,22 +53,20 @@ if __name__ == "__main__":
 
     E_upper = 1530
     E_lower = 1280
-    T_lower = np.min(timeArr)
+    T_lower = timeArr[0] # start time
 
     timeArr = timeArr - T_lower # normalize time to start at 0
     T_upper = np.max(timeArr) # now T_upper is relative to T_lower
     T_lower = 0 # now T_lower is 0
-    sidereal_day = (3600*23 + 56*60 + 4)*1000 #milliseconds in a sidereal day
+    sidereal_day = (3600*23 + 56*60 + 4) #seconds in a sidereal day
     
 
     eRes = 1 # 1 keV resolution
-    tRes = 1000*3600*3 # hr resolution in milliseconds
-
+    tRes = 3600*3 # 3hr resolution in seconds
 
     eBins = int((E_upper - E_lower)/eRes)
     timeBins = int((T_upper - T_lower)/tRes)
-    global EvT_Hist
-    EvT_Hist = ROOT.TH2D("EvT_Hist", "Energy vs Time;Elapsed Time/3h (ms);Energy/KeV (KeV)", timeBins, T_lower, T_upper, eBins, E_lower, E_upper)
+    EvT_Hist = ROOT.TH2D("EvT_Hist", "Energy vs Time;Elapsed Time/3h (s);Energy/KeV (KeV)", timeBins, T_lower, T_upper, eBins, E_lower, E_upper)
     for i in range(len(timeArr)):
         EvT_Hist.Fill(timeArr[i], energyArr[i], weightArr[i])
     c1 = ROOT.TCanvas("c1", "Energy vs Time", 800, 600)
@@ -81,7 +79,7 @@ if __name__ == "__main__":
     etScatter.GetYaxis().SetRangeUser(1280, 1530)
     etScatter.GetXaxis().SetTitleOffset(2.5)
     etScatter.GetYaxis().SetTitleOffset(2)
-    etScatter.SetTitle("Energy Weighted vs Time (Summer 2020);Elapsed Time (ms);Energy (keV);Sin Squared Weighting")
+    etScatter.SetTitle("Energy Weighted vs Time (Summer 2020);Elapsed Time (s);Energy (keV);Sin Squared Weighting")
     etScatter.SetMarkerStyle(8) #changes from default square to large dot
     etScatter.SetMarkerSize(0.4)
     c2.Draw()
