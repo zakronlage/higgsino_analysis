@@ -85,9 +85,12 @@ if __name__ == "__main__":
     c2.Draw()
     etScatter.Draw("PCOL0") # plot markers with color, no stats box
 
+    periods = timeArr % sidereal_day # get the periods of the sidereal day
+
     etScatter.GetYaxis().SetRangeUser(1459, 1461) #redefine to narrow gap instead
     total = timeArr.size
     validEnergies = np.array(etScatter.GetY())
+    validEnergies = validEnergies[periods.argmin():periods.argmax()] #filter events in the range of periods
     validEnergies = validEnergies[(1459. <= validEnergies) & (validEnergies <= 1461.)] # filter energies in range [1459, 1461]
     nEvents = validEnergies.size
     
@@ -96,7 +99,6 @@ if __name__ == "__main__":
 
     err = ctypes.c_double(5)
 
-    periods = timeArr % sidereal_day # get the periods of the sidereal day
     ##should come up with more robust way to find a period, but this works for now
     inPhaseIntegral = inPhase.IntegralOneDim(timeArr[periods.argmin()], timeArr[periods.argmax()],1e-6,1e-6,err)
     quadIntegral = quadrature.IntegralOneDim(timeArr[periods.argmax()], timeArr[periods.argmax()],1e-6,1e-6,err)
