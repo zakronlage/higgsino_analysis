@@ -36,8 +36,8 @@ if __name__ == "__main__":
     df = ROOT.RDataFrame(chain)
 
     # filtered = df.Filter("AnalysisBaseCut && GoodForAnalysis && PCACut && Multiplicity == 1 && NumberOfPulses == 1")
-    # withSin2Weights = filtered.Define("Sin2Weighting", sin2weight, {"EventTime"}) #defines new column Sin2Weighting using EventTime
-    # withCos2Weights = filtered.Define("CosWeighting", cos2weight, {"EventTime"}) #cosine weighting
+    # withSin2Weights = filtered.Define("Sin2Weighting", sin2weight, ["EventTime"]) #defines new column Sin2Weighting using EventTime
+    # withCos2Weights = filtered.Define("CosWeighting", cos2weight, ["EventTime"]) #cosine weighting
 
     ex = ROOT.RDataFrame("qredtree", "SuperReduced_Background_ds3814.root")
     filtered2 = ex.Filter("AnalysisBaseCut && GoodForAnalysis && PCACut && Multiplicity == 1 && NumberOfPulses == 1")
@@ -53,20 +53,24 @@ if __name__ == "__main__":
 
     E_upper = 1530
     E_lower = 1280
-    T_lower = timeArr[0] # start time
+    T_begin = timeArr[0] # start time
 
-    timeArr = timeArr - T_lower # normalize time to start at 0
-    T_upper = np.max(timeArr) # now T_upper is relative to T_lower
-    T_lower = 0 # now T_lower is 0
+    timeArr = timeArr - T_begin # normalize time to start at 0
+    T_end = np.max(timeArr) # now T_upper is relative to T_lower
+    T_begin = 0 # now T_lower is 0
     sidereal_day = (3600*23 + 56*60 + 4) #seconds in a sidereal day
+
+    energyArr = energyArr[timeArr > 0] # filter out negative times, idk why tf this is happening when processing multiple datasets
+    weightArr = weightArr[timeArr > 0] 
+    timeArr = timeArr[timeArr > 0]
     
 
     eRes = 1 # 1 keV resolution
     tRes = 3600*3 # 3hr resolution in seconds
 
     eBins = int((E_upper - E_lower)/eRes)
-    timeBins = int((T_upper - T_lower)/tRes)
-    EvT_Hist = ROOT.TH2D("EvT_Hist", "Energy vs Time;Elapsed Time/3h (s);Energy/KeV (KeV)", timeBins, T_lower, T_upper, eBins, E_lower, E_upper)
+    timeBins = int((T_end - T_begin)/tRes)
+    EvT_Hist = ROOT.TH2D("EvT_Hist", "Energy vs Time;Elapsed Time/3h (s);Energy/KeV (KeV)", timeBins, -100, T_end, eBins, E_lower, E_upper)
     for i in range(len(timeArr)):
         EvT_Hist.Fill(timeArr[i], energyArr[i], weightArr[i])
     c1 = ROOT.TCanvas("c1", "Energy vs Time", 800, 600)
@@ -85,14 +89,13 @@ if __name__ == "__main__":
     c2.Draw()
     etScatter.Draw("PCOL0") # plot markers with color, no stats box
 
-    periods = timeArr % sidereal_day # get the periods of the sidereal day
+    nperiods = timeArr % sidereal_day # get the periods of the sidereal day
+    begin_period_index = np.asarray(np.isclose(nperiods,0,atol=10)).nonzero()[0].astype(int) # find the indices where the period starts
+    end_period_index = np.asarray(np.isclose(nperiods,sidereal_day,atol=10)).nonzero()[0].astype(int) # find the indices where the period ends
 
     etScatter.GetYaxis().SetRangeUser(1459, 1461) #redefine to narrow gap instead
     total = timeArr.size
     validEnergies = np.array(etScatter.GetY())
-    validEnergies = validEnergies[periods.argmin():periods.argmax()] #filter events in the range of periods
-    validEnergies = validEnergies[(1459. <= validEnergies) & (validEnergies <= 1461.)] # filter energies in range [1459, 1461]
-    nEvents = validEnergies.size
     
     inPhase = ROOT.TF1("f1", cosDemod, timeArr[0], timeArr[-1]) #create a TF1 object for cosine demodulation
     quadrature = ROOT.TF1("f2", sinDemod, timeArr[0], timeArr[-1]) #create a TF1 object for sine demodulation
@@ -100,13 +103,38 @@ if __name__ == "__main__":
     err = ctypes.c_double(5)
 
     ##should come up with more robust way to find a period, but this works for now
-    inPhaseIntegral = inPhase.IntegralOneDim(timeArr[periods.argmin()], timeArr[periods.argmax()],1e-6,1e-6,err)
-    quadIntegral = quadrature.IntegralOneDim(timeArr[periods.argmax()], timeArr[periods.argmax()],1e-6,1e-6,err)
-    iqPhase = ROOT.TMath.ATan2(nEvents * quadIntegral, nEvents * inPhaseIntegral)
+    inPhaseIntegral = []
+    quadIntegral = []
+    nEvents = []
+    durationArr = []
+    #BAD HACK: checked, and end_period_index is shorter than begin_period_index, so this works
+    for i in range(len(end_period_index)):
+        begin_time = timeArr[begin_period_index[i]]
+        end_time = timeArr[end_period_index[i]]
+        duration = abs(end_time - begin_time) #calculate the duration of the period
+        filteredEnergies = validEnergies[begin_period_index[i]:end_period_index[i]] # filter energies for the current period
+        filteredEnergies = filteredEnergies[(1459. <= filteredEnergies) & (filteredEnergies <= 1461.)] # filter energies in range [1459, 1461]
+        if filteredEnergies.size == 0 or not np.isclose(duration, sidereal_day, atol=100): #if no events in the energy range, or period too long, or somehow negative, skip
+            continue
+         #append the duration of the period
+        nEvents.append(filteredEnergies.size) #count number of events in the energy range [1459, 1461] in the current period
+        durationArr.append(duration) #append the duration of the period
+        inPhaseIntegral.append(inPhase.IntegralOneDim(begin_time, end_time, 1e-6, 1e-6, err))
+        quadIntegral.append(quadrature.IntegralOneDim(begin_time, end_time, 1e-6, 1e-6, err))
+        
+    inPhaseIntegral = np.array(inPhaseIntegral)
+    quadIntegral = np.array(quadIntegral)   
+    durationArr = np.array(durationArr).astype(float) #convert to float for division
+
+
+    iqPhase = np.arctan2(inPhaseIntegral, quadIntegral) #calculate phase using arctan2
     #arctan will cancel out constants leaving only phase
-    amplitude = ROOT.TMath.Hypot(nEvents * inPhaseIntegral, nEvents * quadIntegral)
+    amplitude = np.hypot(nEvents * quadIntegral, nEvents * inPhaseIntegral)
 
     print("\n\nThe total number of events in Jul-Aug 2020 dataset is: ", total)
     print("The number of events in the energy range [1459, 1461] is: ", nEvents)
-    print("\nThe phase is: ", iqPhase)
-    print("The amplitude is: ", amplitude, "\n")
+    print("\nThe average phase is: ", np.average(iqPhase))
+    print("The variation in phase is: ", np.std(iqPhase), "radians\n")
+    print("The average amplitude is: ", np.average(amplitude), "keV\n")
+    print("The variation in amplitude is: ", np.std(amplitude), "keV\n")
+    print("duration of each period is: ", durationArr, "seconds")
